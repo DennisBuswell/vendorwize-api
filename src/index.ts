@@ -94,15 +94,18 @@ app.post('/api/events', async (c) => {
   }
 });
 
-// Admin: Create schema and seed data
+// Admin: Create schema (v2 with enriched fields)
 app.post('/api/admin/migrate', async (c) => {
   try {
-    // Create events table
+    // Drop and recreate events table with new schema
+    await db.execute(sql`DROP TABLE IF EXISTS events`);
     await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS events (
+      CREATE TABLE events (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         name VARCHAR(255) NOT NULL,
         description TEXT,
+
+        -- Location
         venue_name VARCHAR(255),
         address VARCHAR(500),
         city VARCHAR(100) NOT NULL,
@@ -110,163 +113,175 @@ app.post('/api/admin/migrate', async (c) => {
         zip_code VARCHAR(20),
         latitude NUMERIC(10, 7),
         longitude NUMERIC(10, 7),
+
+        -- Date/Time
         start_date TIMESTAMP NOT NULL,
         end_date TIMESTAMP NOT NULL,
+        setup_time VARCHAR(10),
+        teardown_time VARCHAR(10),
+
+        -- Event details
         category VARCHAR(100),
-        booth_fee INTEGER,
+        tags JSONB,
         expected_attendance INTEGER,
         vendor_spots INTEGER,
+        is_indoor BOOLEAN DEFAULT false,
+        has_shelter BOOLEAN DEFAULT false,
+        is_recurring BOOLEAN DEFAULT false,
+        recurrence_pattern JSONB,
+
+        -- Booth fees
+        booth_fee_min INTEGER,
+        booth_fee_max INTEGER,
+        booth_fees JSONB,
+
+        -- Application
+        application_method VARCHAR(50),
+        application_url VARCHAR(500),
+        application_platform VARCHAR(100),
+        application_deadline TIMESTAMP,
+        is_juried BOOLEAN DEFAULT false,
+        application_details JSONB,
+
+        -- Vendor requirements
+        handmade_only BOOLEAN DEFAULT false,
+        requires_tax_id BOOLEAN DEFAULT false,
+        requires_insurance BOOLEAN DEFAULT false,
+        requires_tent BOOLEAN DEFAULT false,
+        vendor_requirements JSONB,
+
+        -- Operations
+        weather_policy VARCHAR(50),
+        operations JSONB,
+        policies JSONB,
+        amenities JSONB,
+
+        -- Organizer
         organizer_name VARCHAR(255),
         organizer_email VARCHAR(255),
         organizer_phone VARCHAR(50),
+        organizer_website VARCHAR(500),
+        organizer_description TEXT,
+        organizer_socials JSONB,
+
+        -- Links
         website VARCHAR(500),
+        external_event_url VARCHAR(500),
+
+        -- Status & Metadata
         is_active BOOLEAN DEFAULT true,
-        application_deadline TIMESTAMP,
+        is_verified BOOLEAN DEFAULT false,
+        region VARCHAR(50),
         source_url VARCHAR(500),
+        import_source VARCHAR(100),
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       )
     `);
-    return c.json({ status: 'Schema created successfully' });
+    return c.json({ status: 'Schema v2 created successfully' });
   } catch (error) {
     console.error('Migration error:', error);
     return c.json({ error: 'Migration failed', details: String(error) }, 500);
   }
 });
 
-// Admin: Seed sample events
-app.post('/api/admin/seed', async (c) => {
+// Admin: Import enriched events from JSON
+app.post('/api/admin/import', async (c) => {
   try {
-    const seedEvents = [
-      {
-        name: "State Farmers Market",
-        description: "North Carolina's largest farmers market featuring local produce, plants, and artisan goods.",
-        venueName: "NC State Farmers Market",
-        address: "1201 Agriculture St",
-        city: "Raleigh",
-        state: "NC",
-        zipCode: "27603",
-        latitude: "35.7564",
-        longitude: "-78.6699",
-        startDate: new Date("2025-01-04T07:00:00"),
-        endDate: new Date("2025-01-04T18:00:00"),
-        category: "farmers_market",
-        boothFee: 5000,
-        expectedAttendance: 5000,
-        vendorSpots: 100,
-        organizerName: "NC Dept of Agriculture",
-        website: "https://www.ncagr.gov/markets/",
-        isActive: true,
-      },
-      {
-        name: "Downtown Raleigh Artisan Market",
-        description: "Weekly artisan market in the heart of downtown featuring handcrafted goods and local art.",
-        venueName: "Moore Square",
-        address: "200 S Blount St",
-        city: "Raleigh",
-        state: "NC",
-        zipCode: "27601",
-        latitude: "35.7762",
-        longitude: "-78.6364",
-        startDate: new Date("2025-01-11T10:00:00"),
-        endDate: new Date("2025-01-11T16:00:00"),
-        category: "craft_fair",
-        boothFee: 7500,
-        expectedAttendance: 2000,
-        vendorSpots: 40,
-        organizerName: "Downtown Raleigh Alliance",
-        website: "https://downtownraleigh.org",
-        isActive: true,
-      },
-      {
-        name: "Durham Craft Market",
-        description: "Monthly craft market celebrating local makers and artisans in Durham.",
-        venueName: "Durham Central Park",
-        address: "501 Foster St",
-        city: "Durham",
-        state: "NC",
-        zipCode: "27701",
-        latitude: "35.9986",
-        longitude: "-78.8986",
-        startDate: new Date("2025-01-18T09:00:00"),
-        endDate: new Date("2025-01-18T14:00:00"),
-        category: "craft_fair",
-        boothFee: 6000,
-        expectedAttendance: 1500,
-        vendorSpots: 35,
-        organizerName: "Durham Central Park",
-        isActive: true,
-      },
-      {
-        name: "Cary Farmers Market",
-        description: "Year-round farmers market featuring fresh produce and local goods.",
-        venueName: "Downtown Cary Park",
-        address: "316 N Academy St",
-        city: "Cary",
-        state: "NC",
-        zipCode: "27513",
-        latitude: "35.7915",
-        longitude: "-78.7811",
-        startDate: new Date("2025-01-25T08:00:00"),
-        endDate: new Date("2025-01-25T12:00:00"),
-        category: "farmers_market",
-        boothFee: 4000,
-        expectedAttendance: 1200,
-        vendorSpots: 50,
-        organizerName: "Town of Cary",
-        website: "https://www.townofcary.org",
-        isActive: true,
-      },
-      {
-        name: "Chapel Hill Spring Festival",
-        description: "Annual spring festival with vendors, food trucks, and live entertainment.",
-        venueName: "Franklin Street",
-        address: "100 E Franklin St",
-        city: "Chapel Hill",
-        state: "NC",
-        zipCode: "27514",
-        latitude: "35.9132",
-        longitude: "-79.0558",
-        startDate: new Date("2025-03-15T11:00:00"),
-        endDate: new Date("2025-03-16T18:00:00"),
-        category: "festival",
-        boothFee: 15000,
-        expectedAttendance: 10000,
-        vendorSpots: 80,
-        organizerName: "Chapel Hill Downtown Partnership",
-        website: "https://downtownchapelhill.com",
-        applicationDeadline: new Date("2025-02-15"),
-        isActive: true,
-      },
-      {
-        name: "Wake Forest Farmers Market",
-        description: "Community farmers market with local produce and artisan goods.",
-        venueName: "Wake Forest Town Hall",
-        address: "301 S Brooks St",
-        city: "Wake Forest",
-        state: "NC",
-        zipCode: "27587",
-        latitude: "35.9799",
-        longitude: "-78.5097",
-        startDate: new Date("2025-02-01T09:00:00"),
-        endDate: new Date("2025-02-01T13:00:00"),
-        category: "farmers_market",
-        boothFee: 3500,
-        expectedAttendance: 800,
-        vendorSpots: 25,
-        organizerName: "Wake Forest Downtown",
-        isActive: true,
-      },
-    ];
+    const body = await c.req.json();
+    const enrichedEvents = body.events || [];
+    let imported = 0;
+    let errors: string[] = [];
 
-    for (const event of seedEvents) {
-      await db.insert(events).values(event);
+    for (const item of enrichedEvents) {
+      try {
+        const e = item.event;
+        const o = item.organizer || {};
+        const loc = e.location || {};
+        const app = e.application || {};
+        const vr = e.vendor_requirements || {};
+        const ops = e.operations || {};
+        const minFee = e.min_booth_fee?.amount ? Math.round(e.min_booth_fee.amount * 100) : null;
+        const maxFee = e.max_booth_fee?.amount ? Math.round(e.max_booth_fee.amount * 100) : null;
+
+        await db.insert(events).values({
+          name: e.name,
+          description: e.description,
+          venueName: loc.venue_name,
+          address: loc.address_line1,
+          city: loc.city || 'Unknown',
+          state: loc.state || 'NC',
+          zipCode: loc.postal_code,
+          latitude: loc.latitude ? String(loc.latitude) : null,
+          longitude: loc.longitude ? String(loc.longitude) : null,
+          startDate: new Date(e.start_date),
+          endDate: new Date(e.end_date),
+          setupTime: e.setup_time,
+          teardownTime: e.teardown_time,
+          category: e.category,
+          tags: e.tags,
+          expectedAttendance: e.expected_attendance,
+          vendorSpots: e.total_booth_capacity,
+          isIndoor: e.is_indoor || false,
+          hasShelter: e.has_shelter || false,
+          isRecurring: e.is_recurring || false,
+          recurrencePattern: e.recurrence_pattern,
+          boothFeeMin: minFee,
+          boothFeeMax: maxFee,
+          boothFees: e.booth_fees,
+          applicationMethod: app.method || e.application_method,
+          applicationUrl: app.url || e.external_application_url,
+          applicationPlatform: app.platform,
+          applicationDeadline: app.deadline ? new Date(app.deadline) : null,
+          isJuried: app.is_juried || false,
+          applicationDetails: app,
+          handmadeOnly: vr.handmade_only || false,
+          requiresTaxId: vr.requires_tax_id || false,
+          requiresInsurance: vr.requires_insurance || false,
+          requiresTent: vr.requires_tent || false,
+          vendorRequirements: vr,
+          weatherPolicy: ops.weather_policy,
+          operations: ops,
+          policies: e.policies,
+          amenities: e.amenities_detailed || e.amenities,
+          organizerName: o.organization_name,
+          organizerEmail: o.contact_email,
+          organizerPhone: o.contact_phone,
+          organizerWebsite: o.website,
+          organizerDescription: o.description,
+          organizerSocials: o.social_links,
+          website: o.website,
+          externalEventUrl: e.external_event_url,
+          isActive: true,
+          isVerified: item.provenance?.is_verified || false,
+          region: e.region,
+          importSource: item.provenance?.import_source || 'api_import',
+        });
+        imported++;
+      } catch (err) {
+        errors.push(`Failed to import "${item.event?.name}": ${err}`);
+      }
     }
 
-    return c.json({ status: 'Seeded successfully', count: seedEvents.length });
+    return c.json({
+      status: 'Import complete',
+      imported,
+      total: enrichedEvents.length,
+      errors: errors.slice(0, 10) // limit error output
+    });
   } catch (error) {
-    console.error('Seed error:', error);
-    return c.json({ error: 'Seeding failed', details: String(error) }, 500);
+    console.error('Import error:', error);
+    return c.json({ error: 'Import failed', details: String(error) }, 500);
+  }
+});
+
+// Admin: Clear all events
+app.delete('/api/admin/events', async (c) => {
+  try {
+    await db.delete(events);
+    return c.json({ status: 'All events deleted' });
+  } catch (error) {
+    return c.json({ error: 'Delete failed', details: String(error) }, 500);
   }
 });
 
