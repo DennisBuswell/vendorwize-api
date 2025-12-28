@@ -34,30 +34,83 @@ app.get('/api/events', async (c) => {
   }
 });
 
-// Get events near a location (simple distance filter)
+// Get events near a location with filtering
 app.get('/api/events/near', async (c) => {
   try {
     const lat = parseFloat(c.req.query('lat') || '35.7796'); // Default: Raleigh
     const lng = parseFloat(c.req.query('lng') || '-78.6382');
     const radiusMiles = parseFloat(c.req.query('radius') || '50');
 
+    // Filter params
+    const category = c.req.query('category');
+    const maxFee = c.req.query('maxFee') ? parseInt(c.req.query('maxFee')!) * 100 : null; // Convert to cents
+    const freeOnly = c.req.query('freeOnly') === 'true';
+    const dateFrom = c.req.query('dateFrom');
+    const dateTo = c.req.query('dateTo');
+    const indoor = c.req.query('indoor') === 'true';
+    const noInsurance = c.req.query('noInsurance') === 'true';
+    const noTent = c.req.query('noTent') === 'true';
+    const handmadeOk = c.req.query('handmadeOk') === 'true'; // excludes handmade-only events
+    const hasDeadline = c.req.query('hasDeadline') === 'true';
+
     // Simple bounding box filter (approximate)
     const latDelta = radiusMiles / 69.0; // ~69 miles per degree latitude
     const lngDelta = radiusMiles / (69.0 * Math.cos(lat * Math.PI / 180));
 
+    // Build conditions array
+    const conditions = [
+      gte(events.latitude, String(lat - latDelta)),
+      lte(events.latitude, String(lat + latDelta)),
+      gte(events.longitude, String(lng - lngDelta)),
+      lte(events.longitude, String(lng + lngDelta))
+    ];
+
+    // Category filter
+    if (category && category !== 'all') {
+      conditions.push(sql`${events.category} = ${category}`);
+    }
+
+    // Fee filters
+    if (freeOnly) {
+      conditions.push(sql`(${events.boothFeeMin} IS NULL OR ${events.boothFeeMin} = 0)`);
+    } else if (maxFee !== null) {
+      conditions.push(sql`(${events.boothFeeMin} IS NULL OR ${events.boothFeeMin} <= ${maxFee})`);
+    }
+
+    // Date filters
+    if (dateFrom) {
+      conditions.push(gte(events.startDate, new Date(dateFrom)));
+    }
+    if (dateTo) {
+      conditions.push(lte(events.startDate, new Date(dateTo)));
+    }
+
+    // Requirement filters
+    if (indoor) {
+      conditions.push(sql`${events.isIndoor} = true`);
+    }
+    if (noInsurance) {
+      conditions.push(sql`(${events.requiresInsurance} = false OR ${events.requiresInsurance} IS NULL)`);
+    }
+    if (noTent) {
+      conditions.push(sql`(${events.requiresTent} = false OR ${events.requiresTent} IS NULL)`);
+    }
+    if (handmadeOk) {
+      conditions.push(sql`(${events.handmadeOnly} = false OR ${events.handmadeOnly} IS NULL)`);
+    }
+    if (hasDeadline) {
+      conditions.push(sql`${events.applicationDeadline} IS NOT NULL`);
+    }
+
     const nearbyEvents = await db.select().from(events)
-      .where(and(
-        gte(events.latitude, String(lat - latDelta)),
-        lte(events.latitude, String(lat + latDelta)),
-        gte(events.longitude, String(lng - lngDelta)),
-        lte(events.longitude, String(lng + lngDelta))
-      ))
+      .where(and(...conditions))
       .orderBy(events.startDate);
 
     return c.json({
       events: nearbyEvents,
       searchCenter: { lat, lng },
-      radiusMiles
+      radiusMiles,
+      filters: { category, maxFee: maxFee ? maxFee / 100 : null, freeOnly, dateFrom, dateTo, indoor, noInsurance, noTent }
     });
   } catch (error) {
     console.error('Error fetching nearby events:', error);
